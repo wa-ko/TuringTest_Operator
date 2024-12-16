@@ -3,6 +3,10 @@ from firebase_admin import credentials, db, initialize_app
 import time
 import firebase_admin
 
+# セッションステートの初期化
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 # Firebaseの初期化
 if 'firebase_app' not in st.session_state:
     try:
@@ -25,89 +29,89 @@ if 'firebase_app' not in st.session_state:
 
         # Firebaseが初期化済みかどうかを確認
         try:
-            app = firebase_admin.get_app('operator_chat_app')  # アプリ名で取得
+            app = firebase_admin.get_app('turing_test_app')  # アプリ名で取得
         except ValueError:
             app = initialize_app(cred, {
                 'databaseURL': database_url,
-            }, name='operator_chat_app')  # アプリ名で初期化
+            }, name='turing_test_app')  # アプリ名で初期化
 
         st.session_state.firebase_app = True
 
     except Exception as e:
         st.error(f"Firebaseの初期化に失敗しました: {str(e)}")
 
-# セッションステートの初期化
-if "messages" not in st.session_state:
-    st.session_state.messages = []
 
-if "current_topic" not in st.session_state:
-    st.session_state.current_topic = "未設定"
+st.session_state.current_topic = "未設定"
+ref = db.reference('chats', app=firebase_admin.get_app('turing_test_app'))
 
+# チャット履歴の取得と表示
+all_messages = ref.get()
 # ページ構成
 st.title("Operator Chat")
 st.subheader(f"現在のお題: {st.session_state.current_topic}")
 
-ref = db.reference('chats', app=firebase_admin.get_app('operator_chat_app'))
+chat_placeholder = st.container()
 
-all_messages = ref.get()
+if "data_fetched" not in st.session_state:
+    if all_messages:
+        st.session_state.messages = []
+        for msg_id, msg_data in all_messages.items():
+            st.session_state.messages.append(
+                {"role": "user", "content": msg_data['content']})
 
+            role = msg_data['role']
+            if role == "operator":
+                role = "assistant"
+            if 'response' in msg_data:
+                st.session_state.messages.append(
+                    {"role": "assistant", "content": msg_data['response']})
+
+            if "current_topic" not in st.session_state:
+                st.session_state.current_topic = "未設定"
+            else:
+                st.session_state.current_topic = msg_data.get('topic', '未設定')
+
+    # データが取得されたことをフラグとして設定
+    st.session_state.data_fetched = True
+
+with chat_placeholder:
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+response = st.chat_input("ここに入力してください")
+
+if response:
+    with st.chat_message("assistant"):
+        st.markdown(response)
+    st.session_state.messages.append({"role": "assistant", "content": response})
+    latest_message_id = list(all_messages.keys())[-1]
+    # Save operator response to Firebase
+    ref.child(latest_message_id).update({
+        'response': response,
+        'status': 'responded',
+        'response_time': time.time(),
+        'role': 'operator'
+    })
 
 with st.chat_message("user"):
-    st.markdown(all_messages)
-st.session_state.messages.append({"role": "user", "content": all_messages})
+    message_placeholder = st.empty()
 
-with st.chat_message("assistant"):
-            message_placeholder = st.empty()
+    try:
+        while True:
+            message_data = ref.order_by_child('status').equal_to('pending').limit_to_last(1).get()
+            if message_data:
+                # 最新のメッセージを取得
+                latest_message_id = list(message_data.keys())[0]
+                human_message = message_data[latest_message_id].get('content')
+                if message_data[latest_message_id].get('status') == 'pending':
+                    break
+            else:
+                continue
 
-# メッセージ取得関数
-def get_pending_messages():
-    return ref.order_by_child('status').equal_to('pending').get()
+        message_placeholder.markdown(human_message or "No response available.")
+        st.session_state.messages.append({"role": "user", "content": human_message or "No response available."})
 
-# 1秒ごとにデータを更新
-while True:
-    messages = get_pending_messages()
-
-    # 未応答のメッセージを表示
-    if messages:
-        for message_id, message_data in messages.items():
-            st.write(f"新しいメッセージ (Topic: {message_data.get('topic', 'N/A')}):")
-            st.text(message_data.get('content', 'No content'))
-
-            with st.chat_message("operator"):
-                message_placeholder = st.empty()
-                response = st.text_input("返信を入力してください", key=message_id)  # ここにユニークなkeyを設定
-
-                try:
-                    if response:
-                        ref.child(message_id).update({
-                            'response': response,
-                            'status': 'responded',
-                            'response_time': time.time(),
-                            'role': 'operator'
-                        })
-                        st.success("返信が送信されました。")
-                        message_placeholder.markdown(response)
-
-                except Exception as e:
-                    st.error(f"An error occurred: {e}")
-                    full_response = "An error occurred while sending the response."
-    else:
-        st.write("未応答のメッセージはありません。")
-
-    # 会話履歴の表示
-    st.subheader("会話履歴")
-    all_messages = ref.get()
-    if all_messages:
-        for msg_id, msg_data in all_messages.items():
-            st.markdown(f"- **{msg_data['role'].capitalize()}**: {msg_data['content']}")
-    else:
-        st.write("会話履歴はありません。")
-
-    # Firebaseの履歴を全消しするボタン
-    if st.button("履歴を全消し"):
-        ref.delete()  # chatsノードを全削除
-        st.success("Firebaseの履歴が全て削除されました。")
-
-    # 1秒ごとに再実行
-    time.sleep(1)
-    st.experimental_rerun()
+    except Exception as e:
+        st.error(f"An error occurred: {e}")
+        operator_response = "An error occurred while fetching the message."
