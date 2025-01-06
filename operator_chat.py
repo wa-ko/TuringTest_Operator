@@ -49,7 +49,7 @@ if 'firebase_app' not in st.session_state:
         st.error(f"Firebaseの初期化に失敗しました: {str(e)}")
 
 # Firebaseデータベースの参照
-ref = db.reference('chats', app=firebase_admin.get_app('turing_test_app'))
+ref_chats = db.reference('chats', app=firebase_admin.get_app('turing_test_app'))
 config_ref = db.reference('config', app=firebase_admin.get_app('turing_test_app'))
 
 # サイドバーにページ切り替えボタンを追加
@@ -89,7 +89,7 @@ if st.session_state.page == 'chat':
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
-    all_messages = ref.get()
+    all_messages = ref_chats.get()
     st.session_state.current_topic = "未設定"
     if "data_fetched" not in st.session_state:
         if all_messages:
@@ -118,7 +118,7 @@ if st.session_state.page == 'chat':
         st.session_state.messages.append({"role": "assistant", "content": response})
         latest_message_id = list(all_messages.keys())[-1]
         # Save operator response to Firebase
-        ref.child(latest_message_id).update({
+        ref_chats.child(latest_message_id).update({
             'response': response,
             'status': 'responded',
             'response_time': time.time(),
@@ -128,7 +128,7 @@ if st.session_state.page == 'chat':
         message_placeholder = st.empty()
         try:
             while True:
-                message_data = ref.order_by_child('status').equal_to('pending').limit_to_last(1).get()
+                message_data = ref_chats.order_by_child('status').equal_to('pending').limit_to_last(1).get()
                 if message_data:
                     # 最新のメッセージを取得
                     latest_message_id = list(message_data.keys())[0]
