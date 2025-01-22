@@ -65,11 +65,11 @@ if st.sidebar.button('結果ページへ'):
 
 if st.session_state.page == 'setting':
         # 会話モードの切り替えスイッチ
-    talk_mode = st.radio("会話相手を選択してください", ("AI", "Human"), index=0 if st.session_state.talk_mode == "AI" else 1)
+    talk_mode = st.radio("会話相手を選択してください", ("AI", "人間"), index=0 if st.session_state.talk_mode == "AI" else 1)
     if talk_mode != st.session_state.talk_mode:
         st.session_state.talk_mode = talk_mode
         config_ref.update({"talk_mode": talk_mode})
-    if talk_mode == "Human":
+    if talk_mode == "人間":
         chat_placeholder = st.container()
     if st.button("Firebaseのchatsを削除"):
         try:
